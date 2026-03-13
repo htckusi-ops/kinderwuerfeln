@@ -367,21 +367,17 @@ class Spielbildschirm:
             do_sub = random.random() < 0.40
 
         if do_sub:
-            # Subtraktion: sortiere absteigend, subtrahiere solange Ergebnis ≥ 0
+            # Subtraktion: alle Würfel absteigend; nur wenn Ergebnis >= 0
             sortiert = sorted(w, reverse=True)
-            minuend     = sortiert[0]
-            subtrahenden = []
-            rest = minuend
-            for s in sortiert[1:]:
-                if rest - s >= 0:
-                    rest -= s
-                    subtrahenden.append(s)
-            if subtrahenden:
+            ergebnis = sortiert[0] - sum(sortiert[1:])
+            if ergebnis >= 0:
                 self.aufgabe_typ   = "-"
-                self.aufgabe_teile = [minuend] + subtrahenden
-                self.loesung       = rest
+                self.aufgabe_teile = sortiert
+                self.loesung       = ergebnis
+                # Würfel in gleicher Reihenfolge wie Gleichung anzeigen
+                self.wuerfel = sortiert[:]
             else:
-                # Fallback: Addition (alle Würfel ergeben zu große Differenz)
+                # Geht nicht ohne negatives Ergebnis → Addition
                 self.aufgabe_typ   = "+"
                 self.aufgabe_teile = w[:]
                 self.loesung       = sum(w)
