@@ -49,6 +49,22 @@ WUERFEL_FARBEN = [
 
 # ── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
+def _zeichne_wuerfel_auf(tmp, groesse, wert, farbe, punkte=True):
+    """Zeichnet einen Würfel auf eine SRCALPHA-Surface der Größe groesse×groesse."""
+    rand = max(6, groesse // 8)
+    pygame.draw.rect(tmp, (*farbe, 255), (0, 0, groesse, groesse),
+                     border_radius=rand)
+    pygame.draw.rect(tmp, (*WEISS, 90), (3, 3, groesse - 6, groesse - 6),
+                     width=3, border_radius=rand)
+    if punkte:
+        pr = max(5, groesse // 9)
+        for px, py in PUNKTE_LAYOUT[wert]:
+            cx = int(px * groesse)
+            cy = int(py * groesse)
+            pygame.draw.circle(tmp, SCHATTEN, (cx + 2, cy + 2), pr)
+            pygame.draw.circle(tmp, PUNKT_FARBE, (cx, cy), pr)
+
+
 def zeichne_wuerfel(surf, x, y, groesse, wert, farbe, alpha=255):
     rand = max(6, groesse // 8)
     # Schatten
@@ -58,18 +74,35 @@ def zeichne_wuerfel(surf, x, y, groesse, wert, farbe, alpha=255):
     surf.blit(sh, (x - 4, y - 4))
     # Körper
     ws = pygame.Surface((groesse, groesse), pygame.SRCALPHA)
-    pygame.draw.rect(ws, (*farbe, alpha), (0, 0, groesse, groesse),
-                     border_radius=rand)
-    pygame.draw.rect(ws, (*WEISS, 90), (3, 3, groesse - 6, groesse - 6),
-                     width=3, border_radius=rand)
+    _zeichne_wuerfel_auf(ws, groesse, wert, farbe)
     surf.blit(ws, (x, y))
-    # Punkte
-    pr = max(5, groesse // 9)
-    for px, py in PUNKTE_LAYOUT[wert]:
-        cx = int(x + px * groesse)
-        cy = int(y + py * groesse)
-        pygame.draw.circle(surf, SCHATTEN, (cx + 2, cy + 2), pr)
-        pygame.draw.circle(surf, PUNKT_FARBE, (cx, cy), pr)
+
+
+def zeichne_wuerfel_3d_anim(surf, x, y, groesse, wert, farbe, spin_deg):
+    """Würfel mit 3D-Dreh-Animation um die Y-Achse (Spinning beim Würfeln)."""
+    spin_rad   = math.radians(spin_deg)
+    cos_val    = math.cos(spin_rad)
+    scale_x    = max(0.04, abs(cos_val))
+
+    # Welche Seite ist gerade vorne?
+    vorne = cos_val >= 0
+    draw_farbe = farbe if vorne else tuple(min(255, c + 50) for c in farbe)
+    punkte     = vorne and scale_x > 0.25
+
+    tmp = pygame.Surface((groesse, groesse), pygame.SRCALPHA)
+    _zeichne_wuerfel_auf(tmp, groesse, wert, draw_farbe, punkte)
+
+    scaled_w = max(4, int(groesse * scale_x))
+    scaled   = pygame.transform.scale(tmp, (scaled_w, groesse))
+
+    rand = max(6, groesse // 8)
+    # Schatten
+    sh = pygame.Surface((scaled_w + 10, groesse + 10), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (*SCHATTEN, 90), (6, 6, scaled_w, groesse),
+                     border_radius=rand)
+    cx_off = groesse // 2 - scaled_w // 2
+    surf.blit(sh, (x + cx_off - 4, y - 4))
+    surf.blit(scaled, (x + cx_off, y))
 
 
 def zeichne_button(surf, rect, text, font, farbe, textfarbe,
@@ -126,10 +159,16 @@ class Stern:
 # ── Startbildschirm ──────────────────────────────────────────────────────────
 
 class Startbildschirm:
+    MODI        = ["addition", "subtraktion", "gemischt"]
+    MODI_TEXT   = ["Addition", "Subtraktion", "Gemischt"]
+    MODI_FARBEN = [DUNKELBLAU, ROT, ORANGE]
+
     def __init__(self, spiel):
         self.spiel   = spiel
         self.anzahl  = 2
+        self.modus   = "gemischt"
         self.hover_s = self.hover_m = self.hover_p = False
+        self.hover_modi = [False, False, False]
         self.werte   = [random.randint(1, 6) for _ in range(6)]
         self.timer   = 0
 
@@ -137,17 +176,22 @@ class Startbildschirm:
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             mx, my = ev.pos
             if self._r_start().collidepoint(mx, my):
-                self.spiel.starte_spiel(self.anzahl)
+                self.spiel.starte_spiel(self.anzahl, self.modus)
             elif self._r_minus().collidepoint(mx, my) and self.anzahl > 1:
                 self.anzahl -= 1
             elif self._r_plus().collidepoint(mx, my) and self.anzahl < 6:
                 self.anzahl += 1
+            else:
+                for i, r in enumerate(self._r_modus_buttons()):
+                    if r.collidepoint(mx, my):
+                        self.modus = self.MODI[i]
 
     def update(self):
         mx, my = pygame.mouse.get_pos()
         self.hover_s = self._r_start().collidepoint(mx, my)
         self.hover_m = self._r_minus().collidepoint(mx, my)
         self.hover_p = self._r_plus().collidepoint(mx, my)
+        self.hover_modi = [r.collidepoint(mx, my) for r in self._r_modus_buttons()]
         self.timer  += 1
         if self.timer % 60 == 0:
             self.werte[random.randint(0, 5)] = random.randint(1, 6)
@@ -182,11 +226,11 @@ class Startbildschirm:
         pygame.draw.line(surf, DUNKELBLAU,
                          (W // 2 - 320, 270), (W // 2 + 320, 270), 4)
 
-        # Würfelauswahl
+        # ── Würfelanzahl ──────────────────────────────────────────────────────
         t3 = self.spiel.fm.render("Wie viele Wuerfel?", True, SCHWARZ)
         surf.blit(t3, t3.get_rect(centerx=W // 2, y=295))
 
-        zeichne_button(surf, self._r_minus(), "-", self.spiel.fg,
+        zeichne_button(surf, self._r_minus(), "-", self.spiel.fm,
                        ROT, WEISS, self.hover_m and self.anzahl > 1, radius=20)
 
         box = pygame.Rect(W // 2 - 80, 390, 160, 120)
@@ -195,12 +239,27 @@ class Startbildschirm:
         tz = self.spiel.fz.render(str(self.anzahl), True, DUNKELBLAU)
         surf.blit(tz, tz.get_rect(center=box.center))
 
-        zeichne_button(surf, self._r_plus(), "+", self.spiel.fg,
+        zeichne_button(surf, self._r_plus(), "+", self.spiel.fm,
                        GRUEN, WEISS, self.hover_p and self.anzahl < 6,
                        radius=20)
 
-        # Vorschau
-        vy = 545
+        # ── Rechenart-Auswahl ────────────────────────────────────────────────
+        tma = self.spiel.fm.render("Rechenart:", True, SCHWARZ)
+        surf.blit(tma, tma.get_rect(centerx=W // 2, y=540))
+
+        for i, (r, text, farbe) in enumerate(zip(
+                self._r_modus_buttons(), self.MODI_TEXT, self.MODI_FARBEN)):
+            gewahlt = (self.modus == self.MODI[i])
+            bg      = farbe if gewahlt else SCHATTEN
+            rand    = 3 if gewahlt else 0
+            # Hervorheben bei Auswahl
+            if gewahlt:
+                pygame.draw.rect(surf, GELB, r.inflate(8, 8), border_radius=20)
+            zeichne_button(surf, r, text, self.spiel.fk, bg, WEISS,
+                           self.hover_modi[i], radius=18)
+
+        # ── Vorschau ──────────────────────────────────────────────────────────
+        vy = 720
         tv = self.spiel.fk.render("Vorschau:", True, SCHWARZ)
         surf.blit(tv, tv.get_rect(centerx=W // 2, y=vy))
         ws = min(110, (W - 120) // max(self.anzahl, 1) - 24)
@@ -212,7 +271,7 @@ class Startbildschirm:
             zeichne_wuerfel(surf, sx + i * (ws + 18), vy + 48 + bob,
                             ws, wert, WUERFEL_FARBEN[i % 6])
 
-        # Start-Button
+        # ── Start-Button ──────────────────────────────────────────────────────
         zeichne_button(surf, self._r_start(), "Spielen!",
                        self.spiel.fm, GRUEN, WEISS, self.hover_s, radius=32)
 
@@ -231,29 +290,41 @@ class Startbildschirm:
     def _r_plus(self):
         return pygame.Rect(self.spiel.breite // 2 + 150, 390, 120, 120)
 
+    def _r_modus_buttons(self):
+        W  = self.spiel.breite
+        bw, bh = 280, 80
+        ab = 20
+        total = 3 * bw + 2 * ab
+        x0    = W // 2 - total // 2
+        y0    = 615
+        return [pygame.Rect(x0 + i * (bw + ab), y0, bw, bh) for i in range(3)]
+
 
 # ── Spielbildschirm ──────────────────────────────────────────────────────────
 
 class Spielbildschirm:
-    ROLL_DAUER = 40
+    ROLL_DAUER = 45
 
-    def __init__(self, spiel, anzahl):
+    def __init__(self, spiel, anzahl, modus="gemischt"):
         self.spiel   = spiel
         self.anzahl  = anzahl
+        self.modus   = modus          # "addition", "subtraktion", "gemischt"
         self.wuerfel = [random.randint(1, 6) for _ in range(anzahl)]
-        self.wz      = self.wuerfel[:]   # Zielwerte nach Roll
+        self.wz      = self.wuerfel[:]
         # Aufgabe
-        self.aufgabe_typ  = "+"   # "+", "-", "Summe"
-        self.aufgabe_teile = []   # alle Summanden/Minuend-Subtrahend
+        self.aufgabe_typ   = "+"
+        self.aufgabe_teile = []
         self.loesung       = 0
         # Eingabe
-        self.eingabe = ""
-        self.feedback = None       # None / "richtig" / "falsch"
+        self.eingabe  = ""
+        self.feedback = None
         self.fb_timer = 0
         self.sterne: list[Stern] = []
-        # Roll
-        self.rollend   = False
-        self.roll_timer = 0
+        # Roll + 3D-Animation
+        self.rollend      = False
+        self.roll_timer   = 0
+        self.spin_phases  = [random.uniform(0, 360) for _ in range(anzahl)]
+        self.spin_speeds  = [random.uniform(250, 420) for _ in range(anzahl)]
         # Hover
         self.hov_w = self.hov_p = self.hov_m = False
         # Punkte
@@ -263,39 +334,58 @@ class Spielbildschirm:
 
     # ── Würfeln ──────────────────────────────────────────────────────────────
     def wuerfeln(self):
-        self.wz       = [random.randint(1, 6) for _ in range(self.anzahl)]
-        self.rollend  = True
-        self.roll_timer = self.ROLL_DAUER
-        self.feedback = None
-        self.eingabe  = ""
+        self.wz          = [random.randint(1, 6) for _ in range(self.anzahl)]
+        self.rollend     = True
+        self.roll_timer  = self.ROLL_DAUER
+        self.feedback    = None
+        self.eingabe     = ""
+        self.spin_phases = [random.uniform(0, 360) for _ in range(self.anzahl)]
+        self.spin_speeds = [random.uniform(250, 420) for _ in range(self.anzahl)]
 
     def _generiere_aufgabe(self):
         """
-        Aufgabe auf Basis ALLER gewürfelten Würfel:
-          Addition  → alle N Würfel addieren: w1 + w2 + ... + wN = ?
-          Subtraktion → zwei Würfel aus dem Wurf wählen (größer − kleiner)
-          Bei 1 Würfel: immer Addition mit einem zweiten Zufallswürfel
+        Aufgabe auf Basis ALLER gewürfelten Würfel.
+        Addition:    alle N Würfel addieren:  w1 + w2 + … + wN = ?
+        Subtraktion: alle Würfel (absteigend): größter − rest, solange ≥ 0.
         """
         w = self.wuerfel
 
         if self.anzahl == 1:
-            # Extra-Würfel generieren damit es immer zwei Terme gibt
             extra = random.randint(1, 6)
             self.aufgabe_typ   = "+"
             self.aufgabe_teile = [w[0], extra]
             self.loesung       = w[0] + extra
+            self.gesamt += 1
+            return
 
-        elif random.random() < 0.40:
-            # Subtraktion: zwei Würfel aus dem Wurf wählen
-            a, b = random.sample(w, 2)
-            if a < b:
-                a, b = b, a
-            self.aufgabe_typ   = "-"
-            self.aufgabe_teile = [a, b]
-            self.loesung       = a - b
+        # Modus bestimmt ob Addition, Subtraktion oder Zufall
+        if self.modus == "addition":
+            do_sub = False
+        elif self.modus == "subtraktion":
+            do_sub = True
+        else:  # gemischt
+            do_sub = random.random() < 0.40
 
+        if do_sub:
+            # Subtraktion: sortiere absteigend, subtrahiere solange Ergebnis ≥ 0
+            sortiert = sorted(w, reverse=True)
+            minuend     = sortiert[0]
+            subtrahenden = []
+            rest = minuend
+            for s in sortiert[1:]:
+                if rest - s >= 0:
+                    rest -= s
+                    subtrahenden.append(s)
+            if subtrahenden:
+                self.aufgabe_typ   = "-"
+                self.aufgabe_teile = [minuend] + subtrahenden
+                self.loesung       = rest
+            else:
+                # Fallback: Addition (alle Würfel ergeben zu große Differenz)
+                self.aufgabe_typ   = "+"
+                self.aufgabe_teile = w[:]
+                self.loesung       = sum(w)
         else:
-            # Addition aller Würfel
             self.aufgabe_typ   = "+"
             self.aufgabe_teile = w[:]
             self.loesung       = sum(w)
@@ -318,12 +408,10 @@ class Spielbildschirm:
                 elif self._r_pruefen().collidepoint(mx, my):
                     self._pruefen()
                 else:
-                    # Ziffern-Buttons
                     for n, r in self._ziffern_rects():
                         if r.collidepoint(mx, my):
                             if len(self.eingabe) < 3:
                                 self.eingabe += str(n)
-                    # Löschen-Button
                     if self._r_loeschen().collidepoint(mx, my):
                         self.eingabe = self.eingabe[:-1]
             else:
@@ -361,6 +449,11 @@ class Spielbildschirm:
         if self.rollend:
             self.roll_timer -= 1
             frac = self.roll_timer / self.ROLL_DAUER
+            # 3D-Spin-Animation
+            for i in range(self.anzahl):
+                self.spin_phases[i] = (self.spin_phases[i]
+                                       + self.spin_speeds[i] / 60) % 360
+            # Zufällige Würfelwerte während des Rollens
             if self.roll_timer % max(1, int(frac * 8 + 1)) == 0:
                 self.wuerfel = [random.randint(1, 6)
                                 for _ in range(self.anzahl)]
@@ -388,15 +481,25 @@ class Spielbildschirm:
         surf.fill(HINTERGRUND)
         pygame.draw.rect(surf, DUNKELBLAU, (0, 0, W, 120))
 
-        # Kopfzeile
+        # ── Kopfzeile ────────────────────────────────────────────────────────
+        # Titel – nur im Bereich links vom Menü-Button
         tt = self.spiel.fm.render("Kinderwuerfeln", True, WEISS)
-        surf.blit(tt, (30, 30))
+        surf.blit(tt, (30, 32))
+
+        # Punkte-Anzeige – links vom Menü-Button (mit Abstand)
         pt = self.spiel.fk.render(
             f"Richtig: {self.richtig} / {self.gesamt}", True, GELB)
-        surf.blit(pt, (W - pt.get_width() - 30, 38))
+        modus_kurz = {"addition": "Addition",
+                      "subtraktion": "Subtraktion",
+                      "gemischt": "Gemischt"}[self.modus]
+        mk = self.spiel.fw.render(f"Modus: {modus_kurz}", True, HELLBLAU)
+        # Platzierung: Score rechts, aber mit Abstand vor dem Menü-Button
+        score_x = W - 260 - pt.get_width()
+        surf.blit(pt, (score_x, 25))
+        surf.blit(mk, (score_x, 72))
 
-        # Menü-Button
-        zeichne_button(surf, self._r_menu(), "<- Menue",
+        # Menü-Button ganz rechts
+        zeichne_button(surf, self._r_menu(), "< Menue",
                        self.spiel.fw, HELLBLAU, DUNKELBLAU,
                        self.hov_m, radius=14)
 
@@ -410,24 +513,27 @@ class Spielbildschirm:
         sx        = W // 2 - gw // 2
 
         for i in range(self.anzahl):
-            bob = (int(10 * math.sin(pygame.time.get_ticks() * 0.003 + i * 1.1))
-                   if self.rollend else 0)
-            zeichne_wuerfel(surf, sx + i * (ws_max + abstand),
-                            wuerfel_y + bob, ws_max,
-                            self.wuerfel[i], WUERFEL_FARBEN[i % 6])
+            xi = sx + i * (ws_max + abstand)
+            if self.rollend:
+                bob = int(12 * math.sin(pygame.time.get_ticks() * 0.004 + i * 1.1))
+                zeichne_wuerfel_3d_anim(surf, xi, wuerfel_y + bob, ws_max,
+                                        self.wuerfel[i], WUERFEL_FARBEN[i % 6],
+                                        self.spin_phases[i])
+            else:
+                zeichne_wuerfel(surf, xi, wuerfel_y, ws_max,
+                                self.wuerfel[i], WUERFEL_FARBEN[i % 6])
 
         # ── Aufgabe ──────────────────────────────────────────────────────────
         if not self.rollend:
             aufgabe_y = wuerfel_y + ws_max + 40
 
             if self.aufgabe_typ == "+":
-                teile_str = " + ".join(str(t) for t in self.aufgabe_teile)
+                teile_str   = " + ".join(str(t) for t in self.aufgabe_teile)
                 aufgabe_str = f"{teile_str}  =  ?"
             else:
-                a, b = self.aufgabe_teile
-                aufgabe_str = f"{a}  -  {b}  =  ?"
+                teile_str   = " - ".join(str(t) for t in self.aufgabe_teile)
+                aufgabe_str = f"{teile_str}  =  ?"
 
-            # Aufgaben-Karte (breite auto je nach Text)
             as_surf = self.spiel.fa.render(aufgabe_str, True, SCHWARZ)
             kw = max(500, as_surf.get_width() + 80)
             karte = pygame.Rect(W // 2 - kw // 2, aufgabe_y, kw, 100)
@@ -466,12 +572,12 @@ class Spielbildschirm:
             # ── Ziffern-Pad ──────────────────────────────────────────────────
             if self.feedback is None:
                 for n, r in self._ziffern_rects():
-                    mx, my2 = pygame.mouse.get_pos()
-                    hov = r.collidepoint(mx, my2)
+                    mx2, my2 = pygame.mouse.get_pos()
+                    hov = r.collidepoint(mx2, my2)
                     zeichne_button(surf, r, str(n), self.spiel.fm,
                                    DUNKELBLAU if hov else (70, 120, 200),
                                    WEISS, hov, radius=18)
-                lr = self._r_loeschen()
+                lr  = self._r_loeschen()
                 hov = lr.collidepoint(*pygame.mouse.get_pos())
                 zeichne_button(surf, lr, "Del", self.spiel.fk,
                                ORANGE, WEISS, hov, radius=18)
@@ -516,28 +622,23 @@ class Spielbildschirm:
 
     def _r_menu(self):
         W = self.spiel.breite
-        return pygame.Rect(W - 230, 25, 200, 65)
+        return pygame.Rect(W - 220, 28, 195, 64)
 
     def _r_loeschen(self):
-        """Löschen-Button rechts neben dem Ziffernpad."""
-        W, H = self.spiel.breite, self.spiel.hoehe
-        # Ziffernpad: 5 Spalten, 2 Zeilen; Lösch-Button rechts daneben
         pad_x, pad_y, bw, bh, ab = self._pad_params()
         return pygame.Rect(pad_x + 5 * (bw + ab), pad_y, bw, bh)
 
     def _pad_params(self):
-        """Gemeinsame Maße für Ziffernpad."""
         W, H = self.spiel.breite, self.spiel.hoehe
         bw, bh, ab = 130, 100, 16
-        total_w = 6 * bw + 5 * ab   # 5 Ziffern + Löschen pro Zeile
-        pad_x = W // 2 - total_w // 2
-        pad_y = H - 340
+        total_w = 6 * bw + 5 * ab
+        pad_x   = W // 2 - total_w // 2
+        pad_y   = H - 340
         return pad_x, pad_y, bw, bh, ab
 
     def _ziffern_rects(self):
-        """Gibt Liste von (ziffer, Rect) für 1-9 und 0 zurück."""
         pad_x, pad_y, bw, bh, ab = self._pad_params()
-        rects = []
+        rects   = []
         ziffern = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
         for i, n in enumerate(ziffern):
             col = i % 5
@@ -569,7 +670,6 @@ class Spiel:
                     pass
             return pygame.font.Font(None, g)
 
-        # fg=groß, fm=mittel, fk=klein, fz=zahl, fa=aufgabe, fw=winzig
         self.fg = lade_font(90)
         self.fz = lade_font(80)
         self.fm = lade_font(62)
@@ -579,8 +679,8 @@ class Spiel:
 
         self.zustand = Startbildschirm(self)
 
-    def starte_spiel(self, anzahl):
-        self.zustand = Spielbildschirm(self, anzahl)
+    def starte_spiel(self, anzahl, modus="gemischt"):
+        self.zustand = Spielbildschirm(self, anzahl, modus)
 
     def laufe(self):
         while True:
