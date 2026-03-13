@@ -177,7 +177,7 @@ class Startbildschirm:
             mx, my = ev.pos
             if self._r_start().collidepoint(mx, my):
                 self.spiel.starte_spiel(self.anzahl, self.modus)
-            elif self._r_minus().collidepoint(mx, my) and self.anzahl > 1:
+            elif self._r_minus().collidepoint(mx, my) and self.anzahl > 2:
                 self.anzahl -= 1
             elif self._r_plus().collidepoint(mx, my) and self.anzahl < 6:
                 self.anzahl += 1
@@ -231,7 +231,7 @@ class Startbildschirm:
         surf.blit(t3, t3.get_rect(centerx=W // 2, y=295))
 
         zeichne_button(surf, self._r_minus(), "-", self.spiel.fm,
-                       ROT, WEISS, self.hover_m and self.anzahl > 1, radius=20)
+                       ROT, WEISS, self.hover_m and self.anzahl > 2, radius=20)
 
         box = pygame.Rect(W // 2 - 80, 390, 160, 120)
         pygame.draw.rect(surf, WEISS, box, border_radius=18)
@@ -587,10 +587,14 @@ class Spielbildschirm:
                 else:
                     ft = f"Nicht ganz... Die Antwort war {self.loesung}."
                     fc, fb = DUNKELROT, (255, 210, 210)
-                fk = pygame.Rect(W // 2 - 380, fby, 760, 80)
+                fs = self.spiel.fm.render(ft, True, fc)
+                pad_x, pad_y = 40, 18
+                fk_w = fs.get_width() + pad_x * 2
+                fk_h = fs.get_height() + pad_y * 2
+                fk_w = max(fk_w, 400)
+                fk = pygame.Rect(W // 2 - fk_w // 2, fby, fk_w, fk_h)
                 pygame.draw.rect(surf, fb,  fk, border_radius=20)
                 pygame.draw.rect(surf, fc,  fk, width=3, border_radius=20)
-                fs = self.spiel.fm.render(ft, True, fc)
                 surf.blit(fs, fs.get_rect(center=fk.center))
 
         # ── Haupt-Buttons ────────────────────────────────────────────────────
