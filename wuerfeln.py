@@ -8,6 +8,11 @@ import pygame
 import random
 import sys
 import math
+import os
+
+# Pfad zur mitgelieferten Schriftart (funktioniert auf Desktop & Android)
+_DIR        = os.path.dirname(os.path.abspath(__file__))
+BUNDLED_TTF = os.path.join(_DIR, "DejaVuSans.ttf")
 
 # ── Farben ──────────────────────────────────────────────────────────────────
 WEISS       = (255, 255, 255)
@@ -173,6 +178,9 @@ class Startbildschirm:
         self.timer   = 0
 
     def event(self, ev):
+        if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+            pygame.quit()
+            sys.exit()
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             mx, my = ev.pos
             if self._r_start().collidepoint(mx, my):
@@ -680,14 +688,10 @@ class Spiel:
         self.breite = VIRT_W
         self.hoehe  = VIRT_H
 
-        # Echte Bildschirmgröße
-        info = pygame.display.Info()
-        self.screen_w = info.current_w
-        self.screen_h = info.current_h
-
         self.vollbild = True
-        self.surf = pygame.display.set_mode(
-            (self.screen_w, self.screen_h), pygame.FULLSCREEN)
+        # (0, 0) + FULLSCREEN → native Auflösung, portabel für Desktop & Android
+        self.surf = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        self.screen_w, self.screen_h = self.surf.get_size()
 
         # Virtuelle Zeichenfläche (festes Layout)
         self.virt = pygame.Surface((VIRT_W, VIRT_H))
@@ -698,6 +702,13 @@ class Spiel:
         self.uhr = pygame.time.Clock()
 
         def lade_font(g):
+            # Gebundelte TTF zuerst (funktioniert auf Android & Desktop)
+            if os.path.exists(BUNDLED_TTF):
+                try:
+                    return pygame.font.Font(BUNDLED_TTF, g)
+                except Exception:
+                    pass
+            # Fallback: Systemschriften
             for name in ("DejaVu Sans", "Liberation Sans", "FreeSans", "Arial", ""):
                 try:
                     return pygame.font.SysFont(name, g)
@@ -752,12 +763,18 @@ class Spiel:
                 if ev.type == pygame.KEYDOWN and ev.key == pygame.K_F11:
                     self.toggle_vollbild()
                     scale, ox, oy = self._scale_info()
-                # Mausklick-Position in virtuelle Koordinaten transformieren
+                # Mausklick → virtuelle Koordinaten
                 if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
                     vx = int((ev.pos[0] - ox) / scale)
                     vy = int((ev.pos[1] - oy) / scale)
                     ev = pygame.event.Event(ev.type,
                                            pos=(vx, vy), button=ev.button)
+                # Android Touch → FINGERDOWN (normalisierte 0..1 Koordinaten)
+                elif ev.type == pygame.FINGERDOWN:
+                    vx = int((ev.x * self.screen_w - ox) / scale)
+                    vy = int((ev.y * self.screen_h - oy) / scale)
+                    ev = pygame.event.Event(pygame.MOUSEBUTTONDOWN,
+                                           pos=(vx, vy), button=1)
                 if ev.type == pygame.VIDEORESIZE and not self.vollbild:
                     self.surf = pygame.display.set_mode(
                         (max(800, ev.w), max(600, ev.h)), pygame.RESIZABLE)
