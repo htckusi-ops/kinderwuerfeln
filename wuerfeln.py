@@ -166,7 +166,7 @@ class Startbildschirm:
     def __init__(self, spiel):
         self.spiel   = spiel
         self.anzahl  = 2
-        self.modus   = "gemischt"
+        self.modus   = "addition"
         self.hover_s = self.hover_m = self.hover_p = False
         self.hover_modi = [False, False, False]
         self.werte   = [random.randint(1, 6) for _ in range(6)]
@@ -187,7 +187,7 @@ class Startbildschirm:
                         self.modus = self.MODI[i]
 
     def update(self):
-        mx, my = pygame.mouse.get_pos()
+        mx, my = self.spiel.maus_virt
         self.hover_s = self._r_start().collidepoint(mx, my)
         self.hover_m = self._r_minus().collidepoint(mx, my)
         self.hover_p = self._r_plus().collidepoint(mx, my)
@@ -219,10 +219,10 @@ class Startbildschirm:
             surf.blit(tmp, (bx, by))
 
         # Titel
-        t1 = self.spiel.fg.render("Kinderwuerfeln", True, DUNKELBLAU)
-        surf.blit(t1, t1.get_rect(centerx=W // 2, y=60))
-        t2 = self.spiel.fm.render("Lerne Rechnen mit Wuerfeln!", True, LILA)
-        surf.blit(t2, t2.get_rect(centerx=W // 2, y=180))
+        t1a = self.spiel.fm.render("Svea's und Binja's", True, LILA)
+        t1b = self.spiel.fg.render("Würfelspiel", True, DUNKELBLAU)
+        surf.blit(t1a, t1a.get_rect(centerx=W // 2, y=45))
+        surf.blit(t1b, t1b.get_rect(centerx=W // 2, y=115))
         pygame.draw.line(surf, DUNKELBLAU,
                          (W // 2 - 320, 270), (W // 2 + 320, 270), 4)
 
@@ -465,7 +465,7 @@ class Spielbildschirm:
             s.update()
         self.sterne = [s for s in self.sterne if s.leben > 0]
 
-        mx, my = pygame.mouse.get_pos()
+        mx, my = self.spiel.maus_virt
         self.hov_w = self._r_wuerfeln().collidepoint(mx, my)
         self.hov_p = self._r_pruefen().collidepoint(mx, my)
         self.hov_m = self._r_menu().collidepoint(mx, my)
@@ -479,7 +479,7 @@ class Spielbildschirm:
 
         # ── Kopfzeile ────────────────────────────────────────────────────────
         # Titel – nur im Bereich links vom Menü-Button
-        tt = self.spiel.fm.render("Kinderwuerfeln", True, WEISS)
+        tt = self.spiel.fm.render("Svea's und Binja's Würfelspiel", True, WEISS)
         surf.blit(tt, (30, 32))
 
         # Punkte-Anzeige – links vom Menü-Button (mit Abstand)
@@ -567,14 +567,14 @@ class Spielbildschirm:
 
             # ── Ziffern-Pad ──────────────────────────────────────────────────
             if self.feedback is None:
+                mx2, my2 = self.spiel.maus_virt
                 for n, r in self._ziffern_rects():
-                    mx2, my2 = pygame.mouse.get_pos()
                     hov = r.collidepoint(mx2, my2)
                     zeichne_button(surf, r, str(n), self.spiel.fm,
                                    DUNKELBLAU if hov else (70, 120, 200),
                                    WEISS, hov, radius=18)
                 lr  = self._r_loeschen()
-                hov = lr.collidepoint(*pygame.mouse.get_pos())
+                hov = lr.collidepoint(mx2, my2)
                 zeichne_button(surf, lr, "Del", self.spiel.fk,
                                ORANGE, WEISS, hov, radius=18)
 
@@ -651,16 +651,36 @@ class Spielbildschirm:
 
 # ── Haupt-Spielklasse ────────────────────────────────────────────────────────
 
+# Virtuelle Auflösung – das gesamte Spiel wird in diesem Koordinatensystem
+# gezeichnet und danach auf den echten Bildschirm skaliert.
+VIRT_W, VIRT_H = 1400, 1200
+
+
 class Spiel:
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("Kinderwuerfeln - Mathe mit Wuerfeln")
+        pygame.display.set_caption("Svea's und Binja's Würfelspiel")
 
-        self.breite = 1400
-        self.hoehe  = 1200
-        self.surf   = pygame.display.set_mode((self.breite, self.hoehe),
-                                               pygame.RESIZABLE)
-        self.uhr    = pygame.time.Clock()
+        # Virtuelle Maße (für alle Layout-Berechnungen)
+        self.breite = VIRT_W
+        self.hoehe  = VIRT_H
+
+        # Echte Bildschirmgröße
+        info = pygame.display.Info()
+        self.screen_w = info.current_w
+        self.screen_h = info.current_h
+
+        self.vollbild = True
+        self.surf = pygame.display.set_mode(
+            (self.screen_w, self.screen_h), pygame.FULLSCREEN)
+
+        # Virtuelle Zeichenfläche (festes Layout)
+        self.virt = pygame.Surface((VIRT_W, VIRT_H))
+
+        # Transformierte Mausposition (virtuelle Koordinaten)
+        self.maus_virt = (0, 0)
+
+        self.uhr = pygame.time.Clock()
 
         def lade_font(g):
             for name in ("DejaVu Sans", "Liberation Sans", "FreeSans", "Arial", ""):
@@ -679,24 +699,66 @@ class Spiel:
 
         self.zustand = Startbildschirm(self)
 
-    def starte_spiel(self, anzahl, modus="gemischt"):
+    def _scale_info(self):
+        """Gibt (scale, offset_x, offset_y) für Letterbox-Skalierung zurück."""
+        sw, sh = self.surf.get_size()
+        scale = min(sw / VIRT_W, sh / VIRT_H)
+        ox    = (sw - VIRT_W * scale) / 2
+        oy    = (sh - VIRT_H * scale) / 2
+        return scale, ox, oy
+
+    def toggle_vollbild(self):
+        self.vollbild = not self.vollbild
+        if self.vollbild:
+            self.surf = pygame.display.set_mode(
+                (self.screen_w, self.screen_h), pygame.FULLSCREEN)
+        else:
+            self.surf = pygame.display.set_mode(
+                (VIRT_W, VIRT_H), pygame.RESIZABLE)
+
+    def starte_spiel(self, anzahl, modus="addition"):
         self.zustand = Spielbildschirm(self, anzahl, modus)
 
     def laufe(self):
         while True:
+            scale, ox, oy = self._scale_info()
+
+            # Mausposition in virtuelle Koordinaten transformieren
+            raw = pygame.mouse.get_pos()
+            self.maus_virt = (
+                int((raw[0] - ox) / scale),
+                int((raw[1] - oy) / scale),
+            )
+
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-                if ev.type == pygame.VIDEORESIZE:
-                    self.breite = max(800, ev.w)
-                    self.hoehe  = max(600, ev.h)
-                    self.surf   = pygame.display.set_mode(
-                        (self.breite, self.hoehe), pygame.RESIZABLE)
+                if ev.type == pygame.KEYDOWN and ev.key == pygame.K_F11:
+                    self.toggle_vollbild()
+                    scale, ox, oy = self._scale_info()
+                # Mausklick-Position in virtuelle Koordinaten transformieren
+                if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+                    vx = int((ev.pos[0] - ox) / scale)
+                    vy = int((ev.pos[1] - oy) / scale)
+                    ev = pygame.event.Event(ev.type,
+                                           pos=(vx, vy), button=ev.button)
+                if ev.type == pygame.VIDEORESIZE and not self.vollbild:
+                    self.surf = pygame.display.set_mode(
+                        (max(800, ev.w), max(600, ev.h)), pygame.RESIZABLE)
+                    scale, ox, oy = self._scale_info()
                 self.zustand.event(ev)
 
             self.zustand.update()
-            self.zustand.zeichne(self.surf)
+            self.zustand.zeichne(self.virt)
+
+            # Virtuelle Fläche skaliert auf echten Bildschirm ausgeben
+            scaled = pygame.transform.smoothscale(
+                self.virt,
+                (int(VIRT_W * scale), int(VIRT_H * scale)))
+            self.surf.fill(SCHWARZ)
+            self.surf.blit(scaled, (int(ox), int(oy)))
+
             pygame.display.flip()
             self.uhr.tick(60)
 
