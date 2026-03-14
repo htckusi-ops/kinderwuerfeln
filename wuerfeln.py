@@ -502,7 +502,7 @@ class Spielbildschirm:
         # ── Würfel ──────────────────────────────────────────────────────────
         wuerfel_y = 145
         rand_lr   = 60
-        abstand   = 20
+        abstand   = 70   # Platz für Operator-Symbol zwischen Würfeln
         ws_max    = min(160, (W - rand_lr * 2 - abstand * (self.anzahl - 1))
                         // self.anzahl)
         gw        = self.anzahl * ws_max + (self.anzahl - 1) * abstand
@@ -518,6 +518,21 @@ class Spielbildschirm:
             else:
                 zeichne_wuerfel(surf, xi, wuerfel_y, ws_max,
                                 self.wuerfel[i], WUERFEL_FARBEN[i % 6])
+                # Operator zwischen Würfeln (nach dem ersten)
+                if i > 0 and self.aufgabe_typ:
+                    op   = self.aufgabe_typ
+                    op_s = self.spiel.fa.render(op, True, DUNKELBLAU)
+                    op_x = xi - abstand // 2 - op_s.get_width() // 2
+                    op_y = wuerfel_y + ws_max // 2 - op_s.get_height() // 2
+                    # Kleiner weisser Hintergrundkreis für bessere Lesbarkeit
+                    pr = max(op_s.get_width(), op_s.get_height()) // 2 + 8
+                    pygame.draw.circle(surf, WEISS,
+                                       (xi - abstand // 2, wuerfel_y + ws_max // 2),
+                                       pr)
+                    pygame.draw.circle(surf, DUNKELBLAU,
+                                       (xi - abstand // 2, wuerfel_y + ws_max // 2),
+                                       pr, 3)
+                    surf.blit(op_s, (op_x, op_y))
 
         # ── Aufgabe ──────────────────────────────────────────────────────────
         if not self.rollend:
